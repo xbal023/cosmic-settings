@@ -1021,21 +1021,21 @@ impl Page {
                         _ => false,
                     };
                     if fix_active {
-                        self.selection.active =
-                            match self.active_service_config().default_background.source {
-                                Source::Path(ref path) if !path.is_dir() => self
-                                    .selection
-                                    .paths
-                                    .iter()
-                                    .find(|(_key, valid_path)| path == valid_path.as_path())
-                                    .map(|(key, _)| Choice::Wallpaper(key))
-                                    .unwrap_or_default(),
-                                Source::Path(_) => Choice::Slideshow,
-                                Source::Color(ref color) => {
-                                    self.selection.add_custom_color(color.clone());
-                                    Choice::Color(color.clone())
-                                }
+                        let source = self.active_service_config().default_background.source.clone();
+                        self.selection.active = match source {
+                            Source::Path(path) if !path.is_dir() => self
+                                .selection
+                                .paths
+                                .iter()
+                                .find(|(_key, valid_path)| path == valid_path.as_path())
+                                .map(|(key, _)| Choice::Wallpaper(key))
+                                .unwrap_or_default(),
+                            Source::Path(_) => Choice::Slideshow,
+                            Source::Color(color) => {
+                                self.selection.add_custom_color(color.clone());
+                                Choice::Color(color)
                             }
+                        };
                     }
                 }
                 WallpaperEvent::Loaded => self.cache_display_image(),
