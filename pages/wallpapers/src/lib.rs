@@ -114,9 +114,10 @@ pub async fn load_each_from_path(
         .map(|path| {
             tokio::task::spawn_blocking(move || {
                 let is_jxl = path.extension().map(|ext| ext == "jxl").unwrap_or_default();
-                let is_image = if !is_jxl {
+                let is_media = if !is_jxl {
                     if let Ok(Some(kind)) = infer::get_from_path(&path) {
-                        infer::MatcherType::Image == kind.matcher_type()
+                        let mt = kind.matcher_type();
+                        mt == infer::MatcherType::Image || mt == infer::MatcherType::Video
                     } else {
                         false
                     }
@@ -125,7 +126,7 @@ pub async fn load_each_from_path(
                     true
                 };
 
-                if is_jxl || is_image {
+                if is_jxl || is_media {
                     load_image_with_thumbnail(path)
                 } else {
                     None
@@ -260,6 +261,11 @@ fn open_image(input_buffer: &mut Vec<u8>, path: &Path) -> Option<DynamicImage> {
         "avif".as_bytes(),
         "webp".as_bytes(),
         "heif".as_bytes(),
+        "mp4".as_bytes(),
+        "webm".as_bytes(),
+        "mkv".as_bytes(),
+        "avi".as_bytes(),
+        "mov".as_bytes(),
     ];
 
     let format_is_supported = path
@@ -268,6 +274,52 @@ fn open_image(input_buffer: &mut Vec<u8>, path: &Path) -> Option<DynamicImage> {
         .unwrap_or_default();
 
     if !format_is_supported {
+        return None;
+    }
+
+    let is_video = path
+        .extension()
+        .map(|ext| {
+            let ext = ext.to_ascii_lowercase();
+            let ext = ext.as_bytes();
+            matches!(ext, b"mp4" | b"webm" | b"mkv" | b"avi" | b"mov")
+        })
+        .unwrap_or_default();
+
+    if is_video {
+        let output = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-i",
+                path.to_str().unwrap_or_default(),
+                "-vframes",
+                "1",
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                "png",
+                "-",
+            ])
+            .output();
+
+        if let Ok(output) = output {
+            if output.status.success() {
+                input_buffer.clear();
+                input_buffer.extend_from_slice(&output.stdout);
+                
+                let input_cursor = std::io::Cursor::new(input_buffer);
+                if let Ok(image_decoder) = image::ImageReader::new(input_cursor).with_guessed_format() {
+                    match image_decoder.decode() {
+                        Ok(image) => return Some(image),
+                        Err(why) => {
+                            tracing::error!(?path, ?why, "ffmpeg image decode failed");
+                            return None;
+                        }
+                    }
+                }
+            }
+        }
+        tracing::error!(?path, "ffmpeg video frame extraction failed");
         return None;
     }
 
