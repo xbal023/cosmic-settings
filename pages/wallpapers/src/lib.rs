@@ -77,12 +77,34 @@ pub async fn config() -> (Config, HashMap<String, (String, (u32, u32))>) {
     (config, displays)
 }
 
+pub async fn lockscreen_config() -> Config {
+    let context = cosmic_bg_config::lockscreen_context().expect("failed to get helper for cosmic bg lockscreen config");
+
+    match Config::load(&context) {
+        Ok(conf) => conf,
+        Err(why) => {
+            tracing::warn!(?why, "Config file error, falling back to defaults");
+            Config::default()
+        }
+    }
+}
+
 pub fn set(config: &mut Config, entry: Entry) {
     if let Ok(context) = cosmic_bg_config::context() {
         let _res = context.set_same_on_all(config.same_on_all);
 
         if let Err(why) = config.set_entry(&context, entry) {
             tracing::error!(?why, "failed to set background");
+        }
+    }
+}
+
+pub fn set_lockscreen(config: &mut Config, entry: Entry) {
+    if let Ok(context) = cosmic_bg_config::lockscreen_context() {
+        let _res = context.set_same_on_all(config.same_on_all);
+
+        if let Err(why) = config.set_entry(&context, entry) {
+            tracing::error!(?why, "failed to set lockscreen background");
         }
     }
 }

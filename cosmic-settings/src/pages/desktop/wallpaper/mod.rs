@@ -63,9 +63,16 @@ pub type Image = ImageBuffer<Rgba<u8>, Vec<u8>>;
 #[derive(Clone, Debug)]
 struct OutputName(String);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetScreen {
+    Desktop,
+    LockScreen,
+}
+
 #[derive(Clone, Debug)]
 pub struct InitUpdate {
     service_config: wallpaper::Config,
+    lockscreen_service_config: wallpaper::Config,
     displays: HashMap<String, (String, (u32, u32))>,
 }
 
@@ -115,6 +122,7 @@ pub enum Message {
     /// State change from cosmic-bg
     UpdateState(cosmic_bg_config::state::State),
     Surface(surface::Action),
+    ChangeTargetScreen(segmented_button::Entity),
 }
 
 impl From<Message> for crate::app::Message {
@@ -163,6 +171,15 @@ pub struct Page {
 
     /// Configuration parameters used by the cosmic-bg service.
     wallpaper_service_config: wallpaper::Config,
+
+    /// Configuration parameters for the lock screen.
+    lockscreen_service_config: wallpaper::Config,
+
+    /// Current screen target for settings.
+    target_screen: TargetScreen,
+
+    /// Model for the target screen tabs.
+    target_screen_tabs: segmented_button::SingleSelectModel,
 
     /// Cache for storing the image used by the display preview.
     cached_display_handle: Option<ImageHandle>,
@@ -227,9 +244,11 @@ impl page::Page<crate::pages::Message> for Page {
 
         let (task, on_enter_handle) = Task::future(async move {
             let (service_config, displays) = wallpaper::config().await;
+            let lockscreen_service_config = wallpaper::lockscreen_config().await;
 
             crate::pages::Message::DesktopWallpaper(Message::Init(Box::new(InitUpdate {
                 service_config,
+                lockscreen_service_config,
                 displays,
             })))
         })
@@ -330,6 +349,16 @@ impl Default for Page {
                 categories
             },
             wallpaper_service_config: wallpaper::Config::default(),
+            lockscreen_service_config: wallpaper::Config::default(),
+            target_screen: TargetScreen::Desktop,
+            target_screen_tabs: {
+                let mut model = segmented_button::SingleSelectModel::builder()
+                    .insert(|b| b.text("Desktop").data(TargetScreen::Desktop))
+                    .insert(|b| b.text("Lock Screen").data(TargetScreen::LockScreen))
+                    .build();
+                model.activate_position(0);
+                model
+            },
             color_model: ColorPickerModel::new(fl!("hex"), fl!("rgb"), None, Some(Color::WHITE)),
             config,
             fit_options: vec![fl!("fill"), fl!("fit-to-screen")],
@@ -369,6 +398,13 @@ impl Default for Page {
 }
 
 impl Page {
+    fn active_service_config(&self) -> &wallpaper::Config {
+        match self.target_screen {
+            TargetScreen::Desktop => &self.wallpaper_service_config,
+            TargetScreen::LockScreen => &self.lockscreen_service_config,
+        }
+    }
+
     fn get_selected_rotation(rotation_frequency: u64) -> usize {
         match rotation_frequency {
             0..=300 => MINUTES_5,
@@ -469,7 +505,7 @@ impl Page {
     }
 
     fn config_output(&self) -> Option<&str> {
-        if self.wallpaper_service_config.same_on_all {
+        if self.active_service_config().same_on_all {
             Some("all")
         } else {
             self.outputs
@@ -484,16 +520,20 @@ impl Page {
             return;
         };
 
-        if self.wallpaper_service_config.same_on_all {
-            self.wallpaper_service_config.backgrounds.clear();
-            self.wallpaper_service_config.outputs.clear();
-        } else if let Some(pos) = self
-            .wallpaper_service_config
+        let config_ref = match self.target_screen {
+            TargetScreen::Desktop => &mut self.wallpaper_service_config,
+            TargetScreen::LockScreen => &mut self.lockscreen_service_config,
+        };
+
+        if config_ref.same_on_all {
+            config_ref.backgrounds.clear();
+            config_ref.outputs.clear();
+        } else if let Some(pos) = config_ref
             .backgrounds
             .iter()
             .position(|entry| entry.output == output)
         {
-            let _removed = self.wallpaper_service_config.backgrounds.swap_remove(pos);
+            let _removed = config_ref.backgrounds.swap_remove(pos);
         }
 
         let entry = match self.selection.active {
@@ -518,7 +558,10 @@ impl Page {
             Choice::Color(ref color) => Entry::new(output, wallpaper::Source::Color(color.clone())),
         };
 
-        wallpaper::set(&mut self.wallpaper_service_config, entry);
+        match self.target_screen {
+            TargetScreen::Desktop => wallpaper::set(&mut self.wallpaper_service_config, entry),
+            TargetScreen::LockScreen => wallpaper::set_lockscreen(&mut self.lockscreen_service_config, entry),
+        }
     }
 
     /// Locate the ID of a wallpaper that's already stored in memory
@@ -556,18 +599,21 @@ impl Page {
 
     /// Apply the selection for the active output.
     fn apply_active_selection(&mut self) {
-        if self.wallpaper_service_config.same_on_all
-            || self.wallpaper_service_config.backgrounds.is_empty()
-        {
-            let entry = self.wallpaper_service_config.default_background.clone();
+        let is_empty_or_same = self.active_service_config().same_on_all
+            || self.active_service_config().backgrounds.is_empty();
+
+        if is_empty_or_same {
+            let entry = self.active_service_config().default_background.clone();
             self.select_wallpaper_entry(&entry);
         } else if let Some(OutputName(output)) = self.outputs.active_data() {
             let mut wallpapers = Vec::new();
 
-            std::mem::swap(
-                &mut self.wallpaper_service_config.backgrounds,
-                &mut wallpapers,
-            );
+            let config_mut = match self.target_screen {
+                TargetScreen::Desktop => &mut self.wallpaper_service_config,
+                TargetScreen::LockScreen => &mut self.lockscreen_service_config,
+            };
+
+            std::mem::swap(&mut config_mut.backgrounds, &mut wallpapers);
 
             for wallpaper in &wallpapers {
                 if wallpaper.output == *output {
@@ -578,10 +624,12 @@ impl Page {
                 }
             }
 
-            std::mem::swap(
-                &mut self.wallpaper_service_config.backgrounds,
-                &mut wallpapers,
-            );
+            let config_mut = match self.target_screen {
+                TargetScreen::Desktop => &mut self.wallpaper_service_config,
+                TargetScreen::LockScreen => &mut self.lockscreen_service_config,
+            };
+
+            std::mem::swap(&mut config_mut.backgrounds, &mut wallpapers);
         }
     }
 
@@ -668,12 +716,13 @@ impl Page {
             _ => return None,
         };
         let old_entry = if output == "all" {
-            Some(&self.wallpaper_service_config.default_background)
+            Some(self.active_service_config().default_background.clone())
         } else {
-            self.wallpaper_service_config
+            self.active_service_config()
                 .backgrounds
                 .iter()
                 .find(|entry| entry.output == output)
+                .cloned()
         };
 
         let entry = Entry::new(output, wallpaper::Source::Path(path))
@@ -848,8 +897,16 @@ impl Page {
             }
 
             Message::SameWallpaper(value) => {
-                self.wallpaper_service_config.same_on_all = value;
-                self.wallpaper_service_config.backgrounds.clear();
+                match self.target_screen {
+                    TargetScreen::Desktop => {
+                        self.wallpaper_service_config.same_on_all = value;
+                        self.wallpaper_service_config.backgrounds.clear();
+                    }
+                    TargetScreen::LockScreen => {
+                        self.lockscreen_service_config.same_on_all = value;
+                        self.lockscreen_service_config.backgrounds.clear();
+                    }
+                }
             }
 
             Message::Select(id) => {
@@ -965,7 +1022,7 @@ impl Page {
                     };
                     if fix_active {
                         self.selection.active =
-                            match self.wallpaper_service_config.default_background.source {
+                            match self.active_service_config().default_background.source {
                                 Source::Path(ref path) if !path.is_dir() => self
                                     .selection
                                     .paths
@@ -990,6 +1047,7 @@ impl Page {
             Message::Init(update) => {
                 self.outputs.clear();
                 self.wallpaper_service_config = update.service_config;
+                self.lockscreen_service_config = update.lockscreen_service_config;
                 self.show_tab_bar = update.displays.len() > 1;
 
                 // Sync custom colors from config.
@@ -1039,6 +1097,15 @@ impl Page {
                             Message::CacheDisplayImage
                         ))),
                 );
+            }
+            Message::ChangeTargetScreen(entity) => {
+                self.target_screen_tabs.activate(entity);
+                if let Some(target) = self.target_screen_tabs.data::<TargetScreen>(entity) {
+                    self.target_screen = *target;
+                }
+                self.apply_active_selection();
+                self.cache_display_image();
+                return Task::none();
             }
             Message::Surface(a) => {
                 return cosmic::task::message(crate::app::Message::Surface(a));
@@ -1221,7 +1288,7 @@ pub fn settings() -> Section<crate::pages::Message> {
             // Slideshow is enabled if the background path from cosmic-bg is a directory
             let mut slideshow_enabled = page
                 .config_output()
-                .and_then(|output| page.wallpaper_service_config.entry(output))
+                .and_then(|output| page.active_service_config().entry(output))
                 .is_some_and(|entry| {
                     if let Source::Path(path) = &entry.source {
                         path.is_dir()
@@ -1254,7 +1321,12 @@ pub fn settings() -> Section<crate::pages::Message> {
                 },
             ));
 
-            if page.wallpaper_service_config.same_on_all {
+            let target_screen_segmented = cosmic::widget::segmented_control::horizontal(&page.target_screen_tabs)
+                .on_activate(Message::ChangeTargetScreen);
+
+            children.push(target_screen_segmented.into());
+
+            if page.active_service_config().same_on_all {
                 let element = text::heading(fl!("all-displays"))
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center)
@@ -1287,7 +1359,7 @@ pub fn settings() -> Section<crate::pages::Message> {
                 let mut column = list_column()
                     .add(settings::item(
                         &descriptions[same_label],
-                        toggler(page.wallpaper_service_config.same_on_all)
+                        toggler(page.active_service_config().same_on_all)
                             .on_toggle(Message::SameWallpaper),
                     ))
                     .add(settings::item(&descriptions[fit_label], wallpaper_fit));
