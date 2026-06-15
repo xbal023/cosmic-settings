@@ -196,6 +196,9 @@ pub struct Page {
 
     /// When set, applys a config update after images are loaded.
     update_config: Option<(usize, HashMap<String, (String, (u32, u32))>)>,
+
+    /// Indicates if a custom file is currently being imported/processed.
+    is_importing: bool,
 }
 
 impl page::Page<crate::pages::Message> for Page {
@@ -356,6 +359,7 @@ impl Default for Page {
             selected_rotation,
             selection: Context::default(),
             update_config: None,
+            is_importing: false,
         };
 
         page.assign_recent_folders();
@@ -759,6 +763,7 @@ impl Page {
             }
 
             Message::ImageAdd(result) => {
+                self.is_importing = false;
                 let result = result.and_then(Arc::into_inner);
 
                 let Some((path, display, selection)) = result else {
@@ -910,15 +915,20 @@ impl Page {
 
                 if path.is_file() {
                     tracing::info!(?path, "opening custom image");
+                    self.is_importing = true;
 
                     // Loads a single custom image and its thumbnail for display in the backgrounds view.
-                    return cosmic::Task::future(async move {
-                        let result = wallpaper::load_image_with_thumbnail(path);
-
-                        let message = Message::ImageAdd(result.map(Arc::new));
-                        let page_message = crate::pages::Message::DesktopWallpaper(message);
-                        crate::Message::PageMessage(page_message)
-                    });
+                    return cosmic::Task::perform(
+                        tokio::task::spawn_blocking(move || {
+                            wallpaper::load_image_with_thumbnail(path)
+                        }),
+                        |res| {
+                            let result = res.unwrap_or(None);
+                            let message = Message::ImageAdd(result.map(Arc::new));
+                            let page_message = crate::pages::Message::DesktopWallpaper(message);
+                            crate::Message::PageMessage(page_message)
+                        }
+                    );
                 }
             }
 
@@ -1330,9 +1340,13 @@ pub fn settings() -> Section<crate::pages::Message> {
                         (fl!("add-image"), Message::ImageAddDialog)
                     };
 
-                    let button = button::link(text).trailing_icon(true).on_press(message);
-
-                    Some(button)
+                    if page.is_importing && Some(Category::Wallpapers) == page.categories.selected {
+                        let button = button::link("Mengimpor...").trailing_icon(true);
+                        Some(button)
+                    } else {
+                        let button = button::link(text).trailing_icon(true).on_press(message);
+                        Some(button)
+                    }
                 } else {
                     None
                 };
