@@ -1,7 +1,7 @@
 use cosmic::{
     Element, Task,
     cctk::sctk::reexports::client::{Proxy, backend::ObjectId, protocol::wl_output::WlOutput},
-    cosmic_config::{self, CosmicConfigEntry},
+    cosmic_config::{self, cosmic_config_derive::CosmicConfigEntry, CosmicConfigEntry},
     cosmic_theme::Density,
     iced::{Alignment, Length},
     surface, theme,
@@ -22,9 +22,47 @@ use std::{collections::HashMap, time::Duration};
 
 use crate::pages::desktop::appearance::Roundness;
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
+pub enum ToplevelFilter {
+    #[default]
+    ActiveWorkspace,
+    ConfiguredOutput,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, CosmicConfigEntry)]
+#[version = 1]
+pub struct AppListConfig {
+    pub filter_top_levels: Option<ToplevelFilter>,
+    pub favorites: Vec<String>,
+    pub enable_drag_source: bool,
+    #[serde(default = "default_magnification_enabled")]
+    pub magnification_enabled: bool,
+    #[serde(default = "default_magnification_scale")]
+    pub magnification_scale: f32,
+}
+
+fn default_magnification_enabled() -> bool { true }
+fn default_magnification_scale() -> f32 { 1.4 }
+
+impl Default for AppListConfig {
+    fn default() -> Self {
+        Self {
+            filter_top_levels: None,
+            favorites: Vec::new(),
+            enable_drag_source: true,
+            magnification_enabled: default_magnification_enabled(),
+            magnification_scale: default_magnification_scale(),
+        }
+    }
+}
+
 pub struct PageInner {
     pub(crate) config_helper: Option<cosmic_config::Config>,
     pub(crate) panel_config: Option<CosmicPanelConfig>,
+    pub(crate) app_list_config_helper: Option<cosmic_config::Config>,
+    pub(crate) app_list_config: Option<AppListConfig>,
     pub opacity: f32,
     pub opacity_changing: bool,
     pub outputs: Vec<String>,
@@ -42,6 +80,8 @@ impl Default for PageInner {
         Self {
             config_helper: Option::default(),
             panel_config: Option::default(),
+            app_list_config_helper: Option::default(),
+            app_list_config: Option::default(),
             opacity: 0.0,
             opacity_changing: false,
             outputs: vec![fl!("all-displays")],
@@ -167,6 +207,8 @@ pub(crate) fn style<
         appearance = fl!("panel-style", "appearance");
         background_opacity = fl!("panel-style", "background-opacity");
         size = fl!("panel-style", "size");
+        magnification = String::from("Icon Magnification");
+        magnification_scale = String::from("Max Scale");
     });
 
     Section::default()
@@ -178,7 +220,7 @@ pub(crate) fn style<
             let Some(panel_config) = inner.panel_config.as_ref() else {
                 return Element::from(text::body(fl!("unknown")));
             };
-            settings::section()
+            let mut section_builder = settings::section()
                 .title(&section.title)
                 .add(settings::item(
                     &descriptions[gap_label],
@@ -268,7 +310,43 @@ pub(crate) fn style<
                                 .max_width(250),
                             )
                     }),
-                )
+                );
+
+            if let Some(app_list_config) = inner.app_list_config.as_ref() {
+                section_builder = section_builder
+                    .add(settings::item(
+                        &descriptions[magnification],
+                        toggler(app_list_config.magnification_enabled).on_toggle(Message::MagnificationEnabled),
+                    ))
+                    .add(settings::item::builder(&descriptions[magnification_scale]).flex_control({
+                        let scale_pct = (app_list_config.magnification_scale * 100.0) as i32;
+                        row::with_capacity(2)
+                            .align_y(Alignment::Center)
+                            .spacing(8)
+                            .width(Length::Fill)
+                            .push(
+                                text::body(fl!(
+                                    "number",
+                                    HashMap::from_iter(vec![(
+                                        "number",
+                                        scale_pct
+                                    )])
+                                ))
+                                .width(Length::Fixed(35.0))
+                                .align_x(Alignment::Center),
+                            )
+                            .push(
+                                slider(100..=200, scale_pct, |v| {
+                                    Message::MagnificationScale(v as f32 / 100.0)
+                                })
+                                .width(Length::Fill)
+                                .apply(container)
+                                .max_width(250),
+                            )
+                    }));
+            }
+
+            section_builder
                 .apply(Element::from)
                 .map(msg_map)
         })
@@ -439,6 +517,8 @@ pub enum Message {
     PanelSize(PanelSize),
     Appearance(usize),
     ExtendToEdge(bool),
+    MagnificationEnabled(bool),
+    MagnificationScale(f32),
     OpacityRequest(f32),
     OpacityApply,
     OutputAdded(String, WlOutput),
@@ -645,6 +725,22 @@ impl PageInner {
                     new_radius = 0;
                 }
                 _ = panel_config.set_border_radius(helper, new_radius).unwrap();
+            }
+            Message::MagnificationEnabled(enabled) => {
+                if let Some(config) = self.app_list_config.as_mut() {
+                    config.magnification_enabled = enabled;
+                    if let Some(app_helper) = self.app_list_config_helper.as_ref() {
+                        let _ = config.write_entry(app_helper);
+                    }
+                }
+            }
+            Message::MagnificationScale(scale) => {
+                if let Some(config) = self.app_list_config.as_mut() {
+                    config.magnification_scale = scale;
+                    if let Some(app_helper) = self.app_list_config_helper.as_ref() {
+                        let _ = config.write_entry(app_helper);
+                    }
+                }
             }
             Message::OpacityRequest(opacity) => {
                 panel_config.opacity = opacity;

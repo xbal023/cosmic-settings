@@ -142,11 +142,18 @@ impl Default for Page {
         })
         .ok();
 
+        let app_list_config_helper = cosmic::cosmic_config::Config::new("com.system76.CosmicAppList", 1).ok();
+        let app_list_config = app_list_config_helper.as_ref()
+            .and_then(|h| inner::AppListConfig::get_entry(h).ok())
+            .or_else(|| Some(inner::AppListConfig::default()));
+
         let container_config = CosmicPanelContainerConfig::load().ok();
         Self {
             inner: PageInner {
                 config_helper,
                 panel_config,
+                app_list_config_helper,
+                app_list_config,
                 container_config,
                 outputs_map: HashMap::new(),
                 system_default,
