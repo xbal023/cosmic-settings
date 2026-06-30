@@ -18,6 +18,55 @@ const AUDIO_CONFIG: &str = "com.system76.CosmicAudio";
 const AMPLIFICATION_SINK: &str = "amplification_sink";
 const AMPLIFICATION_SOURCE: &str = "amplification_source";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemSound {
+    VolumeChange,
+    MessageNew,
+    ScreenCapture,
+    PowerPlug,
+    PowerUnplug,
+    AlarmClock,
+    TrashEmpty,
+}
+
+impl SystemSound {
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::VolumeChange,
+            Self::MessageNew,
+            Self::ScreenCapture,
+            Self::PowerPlug,
+            Self::PowerUnplug,
+            Self::AlarmClock,
+            Self::TrashEmpty,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::VolumeChange => "Volume Ubah",
+            Self::MessageNew => "Notifikasi Pesan Baru",
+            Self::ScreenCapture => "Tangkapan Layar / Screenshot",
+            Self::PowerPlug => "Pengisi Daya Dicolok",
+            Self::PowerUnplug => "Pengisi Daya Dicabut",
+            Self::AlarmClock => "Baterai Lemah / Alarm",
+            Self::TrashEmpty => "Tempat Sampah Dikosongkan",
+        }
+    }
+
+    pub fn filename(&self) -> &'static str {
+        match self {
+            Self::VolumeChange => "audio-volume-change.oga",
+            Self::MessageNew => "message-new-instant.oga",
+            Self::ScreenCapture => "screen-capture.oga",
+            Self::PowerPlug => "power-plug.oga",
+            Self::PowerUnplug => "power-unplug.oga",
+            Self::AlarmClock => "alarm-clock-elapsed.oga",
+            Self::TrashEmpty => "trash-empty.oga",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Message {
     /// Reload the model
@@ -46,6 +95,9 @@ pub enum Message {
     ToggleOverAmplificationSink(bool),
     /// Toggle amplification for sink
     ToggleOverAmplificationSource(bool),
+    TargetSoundSelected(usize),
+    CustomSoundUploadPressed,
+    CustomSoundFileSelected(Option<std::path::PathBuf>),
 }
 
 impl From<Message> for crate::pages::Message {
@@ -73,6 +125,7 @@ pub struct Page {
     sound_config: Option<Config>,
     amplification_sink: bool,
     amplification_source: bool,
+    selected_target_sound_idx: usize,
 }
 
 impl Default for Page {
@@ -88,6 +141,7 @@ impl Default for Page {
             sound_config: None,
             amplification_sink: false,
             amplification_source: false,
+            selected_target_sound_idx: 0,
         }
     }
 }
@@ -117,6 +171,7 @@ impl page::Page<crate::pages::Message> for Page {
         Some(vec![
             sections.insert(output()),
             sections.insert(input()),
+            sections.insert(custom_sound_section()),
             sections.insert(device_profiles()),
         ])
     }
@@ -243,6 +298,45 @@ impl Page {
                 model.usb_audio_text = std::mem::take(&mut self.model.usb_audio_text);
                 self.model = model;
             }
+
+            Message::TargetSoundSelected(idx) => {
+                self.selected_target_sound_idx = idx;
+            }
+
+            Message::CustomSoundUploadPressed => {
+                return cosmic::Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Pilih Suara (.oga) Kustom")
+                            .add_filter("Ogg Audio", &["oga", "ogg"])
+                            .pick_file()
+                            .await
+                            .map(|handle| handle.path().to_path_buf())
+                    },
+                    |path_opt| Message::CustomSoundFileSelected(path_opt).into()
+                );
+            }
+
+            Message::CustomSoundFileSelected(Some(source_path)) => {
+                let target_sound = SystemSound::all()[self.selected_target_sound_idx];
+                let target_filename = target_sound.filename();
+
+                let dest_dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "~".to_string()))
+                    .join(".local/share/sounds/freedesktop/stereo");
+
+                if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+                    tracing::error!("Gagal membuat direktori tempat suara kustom: {}", e);
+                    return Task::none();
+                }
+
+                let dest_path = dest_dir.join(target_filename);
+                match std::fs::copy(&source_path, &dest_path) {
+                    Ok(_) => tracing::info!("Berhasil menyimpan suara sistem kustom di: {:?}", dest_path),
+                    Err(e) => tracing::error!("Gagal menyalin file audio dari dialog: {}", e),
+                }
+            }
+
+            Message::CustomSoundFileSelected(None) => {}
         }
 
         Task::none()
@@ -473,6 +567,39 @@ fn device_profiles() -> Section<crate::pages::Message> {
                 .width(Length::Fill);
 
             settings::section().add(device_profiles).into()
+        })
+}
+
+fn custom_sound_section() -> Section<crate::pages::Message> {
+    Section::default()
+        .title("Kustomisasi Efek Suara")
+        .view::<Page>(move |_binder, page, _section| {
+            let sound_options: Vec<String> = SystemSound::all()
+                .iter()
+                .map(|s| s.label().to_string())
+                .collect();
+
+            let sound_dropdown = widget::dropdown::popup_dropdown(
+                sound_options,
+                Some(page.selected_target_sound_idx),
+                |index| Message::TargetSoundSelected(index),
+                window::Id::RESERVED,
+                Message::Surface,
+                crate::Message::from,
+            )
+            .apply(Element::from)
+            .map(crate::pages::Message::from);
+
+            let upload_button = widget::button::text("Unggah Suara (.oga)")
+                .on_press(Message::CustomSoundUploadPressed)
+                .apply(Element::from)
+                .map(crate::pages::Message::from);
+
+            let controls = settings::section()
+                .add(settings::item("Suara Yang Ingin Diganti", sound_dropdown))
+                .add(settings::item("Berkas OGG (Lokal)", upload_button));
+
+            Element::from(controls)
         })
 }
 

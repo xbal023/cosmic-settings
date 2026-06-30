@@ -98,6 +98,7 @@ gettext-rs = { version = "0.7.7", features = [
 num-traits = "0.2"
 pwhash = "1"
 which = "8.0.0"
+rfd = "0.14"
 
 [dependencies.icu]
 version = "2.1.1"
