@@ -98,6 +98,7 @@ pub enum Message {
     TargetSoundSelected(usize),
     CustomSoundUploadPressed,
     CustomSoundFileSelected(Option<std::path::PathBuf>),
+    CustomSoundUploadFinished,
 }
 
 impl From<Message> for crate::pages::Message {
@@ -307,8 +308,8 @@ impl Page {
                 return cosmic::Task::perform(
                     async {
                         rfd::AsyncFileDialog::new()
-                            .set_title("Pilih Suara (.oga) Kustom")
-                            .add_filter("Ogg Audio", &["oga", "ogg"])
+                            .set_title("Pilih Suara Kustom (Audio Apapun)")
+                            .add_filter("Audio Files", &["oga", "ogg", "mp3", "wav", "flac", "m4a", "aac", "wma"])
                             .pick_file()
                             .await
                             .map(|handle| handle.path().to_path_buf())
@@ -330,13 +331,39 @@ impl Page {
                 }
 
                 let dest_path = dest_dir.join(target_filename);
-                match std::fs::copy(&source_path, &dest_path) {
-                    Ok(_) => tracing::info!("Berhasil menyimpan suara sistem kustom di: {:?}", dest_path),
-                    Err(e) => tracing::error!("Gagal menyalin file audio dari dialog: {}", e),
-                }
+                
+                return cosmic::Task::perform(
+                    async move {
+                        let output = tokio::process::Command::new("ffmpeg")
+                            .arg("-y") // Overwrite output files without asking
+                            .arg("-i")
+                            .arg(&source_path)
+                            .arg("-c:a")
+                            .arg("libvorbis")
+                            .arg(&dest_path)
+                            .output()
+                            .await;
+                        
+                        match output {
+                            Ok(out) if out.status.success() => {
+                                tracing::info!("Berhasil menyimpan & mengonversi suara kustom di: {:?}", dest_path);
+                            }
+                            Ok(out) => {
+                                let err = String::from_utf8_lossy(&out.stderr);
+                                tracing::error!("Gagal mengonversi file (ffmpeg error): {}", err);
+                            }
+                            Err(e) => {
+                                tracing::error!("Gagal menjalankan ffmpeg. Apakah ffmpeg sudah terinstal? Error: {}", e);
+                            }
+                        }
+                    },
+                    |_| Message::CustomSoundUploadFinished.into()
+                );
             }
 
             Message::CustomSoundFileSelected(None) => {}
+
+            Message::CustomSoundUploadFinished => {}
         }
 
         Task::none()
@@ -590,7 +617,7 @@ fn custom_sound_section() -> Section<crate::pages::Message> {
             .apply(Element::from)
             .map(crate::pages::Message::from);
 
-            let upload_button = widget::button::text("Unggah Suara (.oga)")
+            let upload_button = widget::button::text("Unggah Suara (Audio Apapun)")
                 .on_press(Message::CustomSoundUploadPressed)
                 .apply(Element::from)
                 .map(crate::pages::Message::from);
