@@ -198,6 +198,8 @@ vpn-error = VPN Error
     .connect = Failed to connect to VPN
     .connection-editor = Connection editor failed
     .connection-settings = Failed to get settings for active connections
+    .openvpn-config-path = Invalid file path for OpenVPN config
+    .openvpn-config-path-desc = Chosen file must be on a local file system.
     .updating-state = Failed to update network manager state
     .wireguard-config-path = Invalid file path for WireGuard config
     .wireguard-config-path-desc = Chosen file must be on a local file system.
@@ -251,6 +253,12 @@ bluetooth-paired = Previously connected devices
 
 bluetooth-confirm-pin = Confirm Bluetooth PIN
     .description = Please confirm that the following PIN matches the one displayed on { $device }
+
+bluetooth-display-passkey = Bluetooth Pairing
+    .description = Please type the following passkey on { $device }, then press Enter
+
+bluetooth-display-pin = Bluetooth Pairing
+    .description = Please type the following PIN on { $device }, then press Enter
 
 bluetooth-available = Nearby devices
 
@@ -476,7 +484,7 @@ super-key = Super key action
     .launcher = Open Launcher
     .workspaces = Open Workspaces
     .applications = Open Applications
-    .disable = Disable
+    .none = None
 
 edge-gravity = Floating windows gravitate to nearby edges
 
@@ -520,6 +528,9 @@ workspaces-orientation = Workspaces orientation
 
 hot-corner = Hot Corner
     .top-left-corner = Enable top-left hot corner for Workspaces
+
+workspaces-navigation = Navigation
+    .wraparound = Move between first and last workspace using keyboard shortcuts and gestures
 
 ## Displays
 
@@ -701,6 +712,22 @@ keyboard-special-char = Special Character Entry
     .compose = Compose key
     .compose-desc = The compose key allows a wide variety of characters to be entered. To use it, press compose and then a sequence of characters. For example, compose key followed by C and o will enter ©, while compose key followed by a and ‘ will enter á.
     .caps = Caps Lock key
+    .ctrl = Control
+    .ctrl-right = Right Ctrl
+    .swap-with-ctrl = Swap with Control
+    .alt = Alt
+    .alt-left = Left Alt
+    .alt-right = Right Alt
+    .super = Super
+    .super-left = Left Super
+    .super-right = Right Super
+    .menu = Menu key
+    .backspace = Backspace
+    .escape = Escape
+    .swap-with-escape = Swap with Escape
+    .print-screen = Print Screen
+    .scroll-lock = Scroll Lock
+    .none = None
 
 keyboard-typing-assist = Typing
     .repeat-rate = Repeat rate

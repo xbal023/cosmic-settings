@@ -10,7 +10,7 @@ use cosmic::iced::core::text::{Ellipsize, EllipsizeHeightLimit};
 use cosmic::iced::widget::scrollable::RelativeOffset;
 use cosmic::iced::{Alignment, Length, stream, time};
 use cosmic::widget::{
-    self, column, container, dropdown, list_column, segmented_button, tab_bar, text, toggler,
+    self, column, container, dropdown, list_column, segmented_button, tab_bar, text,
 };
 use cosmic::{Apply, Element, Task, surface};
 use cosmic_randr_shell::{
@@ -20,9 +20,10 @@ use cosmic_settings_page::{self as page, Section, section};
 use futures::SinkExt;
 use indexmap::Equivalent;
 use slotmap::{Key, SecondaryMap, SlotMap};
+use std::collections::BTreeMap;
+use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
-use std::{collections::BTreeMap, process::ExitStatus};
 use tokio::sync::oneshot;
 
 static DPI_SCALES: &[u32] = &[50, 75, 100, 125, 150, 175, 200, 225, 250, 275, 300];
@@ -1370,10 +1371,10 @@ pub fn display_configuration() -> Section<crate::pages::Message> {
                     || !active_output.enabled
                 {
                     list_column()
-                        .add(widget::settings::item(
-                            &descriptions[enable_label],
-                            toggler(active_output.enabled).on_toggle(Message::DisplayToggle),
-                        ))
+                        .add(
+                            widget::settings::item::builder(&descriptions[enable_label])
+                                .toggler(active_output.enabled, Message::DisplayToggle),
+                        )
                         .add(widget::settings::item(
                             &descriptions[mirroring_label],
                             widget::dropdown::multi::dropdown(

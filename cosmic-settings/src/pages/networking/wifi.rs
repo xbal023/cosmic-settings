@@ -1,25 +1,22 @@
 // Copyright 2024 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::{Arc, LazyLock},
-};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use cosmic::{
-    Apply, Element, Task,
-    app::ContextDrawer,
-    iced::core::text::Wrapping,
-    iced::{Alignment, Length, widget::operation::focus_next},
-    task,
-    widget::{self, column, icon, space::horizontal as horizontal_space, text_input::focus},
-};
+use cosmic::app::ContextDrawer;
+use cosmic::iced::core::text::Wrapping;
+use cosmic::iced::widget::operation::focus_next;
+use cosmic::iced::{Alignment, Length};
+use cosmic::widget::space::horizontal;
+use cosmic::widget::text_input::focus;
+use cosmic::widget::{self, column, icon};
+use cosmic::{Apply, Element, Task, task};
+use cosmic_settings_network_manager_subscription::available_wifi::{AccessPoint, NetworkType};
+use cosmic_settings_network_manager_subscription::current_networks::ActiveConnectionInfo;
 use cosmic_settings_network_manager_subscription::{
-    self as network_manager, NetworkManagerState,
-    available_wifi::{AccessPoint, NetworkType},
-    current_networks::ActiveConnectionInfo,
-    nm_secret_agent,
+    self as network_manager, NetworkManagerState, nm_secret_agent,
 };
 use cosmic_settings_page::{self as page, Section, section};
 use futures::{SinkExt, StreamExt};
@@ -195,7 +192,7 @@ impl page::Page<crate::pages::Message> for Page {
                     widget::button::standard(fl!("cancel")).on_press(Message::CancelDialog);
 
                 let control: Element<_> = if let Some(identity) = identity {
-                    widget::Column::new()
+                    column::with_capacity(2)
                         .spacing(8)
                         .push(
                             widget::text_input::text_input(fl!("identity"), identity)
@@ -883,7 +880,7 @@ fn devices_view() -> Section<crate::pages::Message> {
             let spacing = cosmic::theme::spacing();
 
             let wifi_enable = widget::settings::item::builder(&section.descriptions[wifi_txt])
-                .control(widget::toggler(state.wifi_enabled).on_toggle(Message::WiFiEnable));
+                .toggler(state.wifi_enabled, Message::WiFiEnable);
 
             let mut view = widget::column::with_capacity(4)
                 .push(widget::list_column().add(wifi_enable))
@@ -1019,7 +1016,7 @@ fn devices_view() -> Section<crate::pages::Message> {
 
                         let item = widget::settings::item_row(vec![
                             identifier.into(),
-                            horizontal_space().into(),
+                            horizontal().into(),
                             controls.into(),
                         ]);
 
@@ -1124,7 +1121,7 @@ fn devices_view() -> Section<crate::pages::Message> {
 
                         let item = widget::settings::item_row(vec![
                             identifier.into(),
-                            horizontal_space().into(),
+                            horizontal().into(),
                             controls.into(),
                         ]);
 
@@ -1176,10 +1173,9 @@ fn devices_view() -> Section<crate::pages::Message> {
 
                     // Search input (only shown when 15+ networks)
                     if show_search {
-                        let search_input =
-                            widget::search_input(fl!("type-to-search"), &page.search_query)
-                                .on_input(Message::SearchQuery)
-                                .on_clear(Message::SearchQuery(String::new()));
+                        let search_input = widget::search_input("", &page.search_query)
+                            .on_input(Message::SearchQuery)
+                            .on_clear(Message::SearchQuery(String::new()));
                         visible_section = visible_section.push(search_input);
                     }
 
@@ -1234,7 +1230,7 @@ fn devices_view() -> Section<crate::pages::Message> {
 
                             let item = widget::settings::item_row(vec![
                                 identifier.into(),
-                                horizontal_space().into(),
+                                horizontal().into(),
                                 connect,
                             ]);
 

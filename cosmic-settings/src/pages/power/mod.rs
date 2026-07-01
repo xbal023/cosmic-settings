@@ -3,12 +3,11 @@ mod backend;
 use self::backend::{GetCurrentPowerProfile, SetPowerProfile};
 use backend::{Battery, ConnectedDevice, PowerProfile};
 
-use cosmic::Task;
 use cosmic::iced::core::text::{Ellipsize, EllipsizeHeightLimit};
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{self, Alignment, Length, stream};
-use cosmic::widget::{self, radio, settings, space::horizontal as horizontal_space, text};
-use cosmic::{Apply, surface};
+use cosmic::widget::{self, settings, space, text};
+use cosmic::{Apply, Task, surface};
 use cosmic_config::{Config, CosmicConfigEntry};
 use cosmic_idle_config::CosmicIdleConfig;
 use cosmic_settings_page::{self as page, Section, section};
@@ -508,12 +507,8 @@ fn connected_devices() -> Section<crate::pages::Message> {
                                 .map(|mut device_row| {
                                     cosmic::Element::from(
                                         row!(
-                                            device_row.next().unwrap_or(
-                                                horizontal_space().width(Length::Fill).into()
-                                            ),
-                                            device_row.next().unwrap_or(
-                                                horizontal_space().width(Length::Fill).into()
-                                            ),
+                                            device_row.next().unwrap_or(space::horizontal().into()),
+                                            device_row.next().unwrap_or(space::horizontal().into()),
                                         )
                                         .spacing(8),
                                     )
@@ -543,18 +538,9 @@ fn profiles() -> Section<crate::pages::Message> {
                     section = profiles
                         .into_iter()
                         .map(|profile| {
-                            settings::item_row(vec![
-                                radio(
-                                    widget::column::with_capacity(2)
-                                        .push(text::body(profile.title()))
-                                        .push(text::caption(profile.description())),
-                                    profile,
-                                    Some(current_profile),
-                                    Message::PowerProfileChange,
-                                )
-                                .width(Length::Fill)
-                                .into(),
-                            ])
+                            settings::item::builder(profile.title())
+                                .description(profile.description())
+                                .radio(profile, Some(current_profile), Message::PowerProfileChange)
                         })
                         .fold(section, settings::Section::add);
                 }

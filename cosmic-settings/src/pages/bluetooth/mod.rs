@@ -3,7 +3,8 @@
 
 use cosmic::iced::core::text::Wrapping;
 use cosmic::iced::{Alignment, Length, color};
-use cosmic::widget::{self, settings, space::horizontal as horizontal_space, text};
+use cosmic::widget::space::horizontal as horizontal_space;
+use cosmic::widget::{self, settings, text};
 use cosmic::{Apply, Element, Task, theme};
 use cosmic_settings_bluetooth_subscription::*;
 use cosmic_settings_page::{self as page, Section, section};
@@ -15,24 +16,25 @@ use std::sync::Arc;
 use std::time::Duration;
 use zbus::zvariant::OwnedObjectPath;
 
+#[cfg(test)]
+use crate::service_manager::MockServiceManager;
+use crate::service_manager::ServiceManagerHandle;
+
 enum Dialog {
-    // RequestAuthorization {
-    //     device: OwnedObjectPath,
-    //     response: oneshot::Sender<bool>,
-    // },
     RequestConfirmation {
         device: String,
         passkey: u32,
         response: oneshot::Sender<bool>,
     },
-    // RequestPasskey {
-    //     device: OwnedObjectPath,
-    //     response: oneshot::Sender<Option<u32>>,
-    // },
-    // RequestPinCode {
-    //     device: OwnedObjectPath,
-    //     response: oneshot::Sender<Option<String>>,
-    // },
+    DisplayPasskey {
+        device: String,
+        passkey: u32,
+        entered: u16,
+    },
+    DisplayPinCode {
+        device: String,
+        pincode: String,
+    },
 }
 
 #[derive(Default)]
@@ -160,6 +162,8 @@ pub struct Page {
     service_is_active: bool,
 
     subscription: Option<tokio::sync::oneshot::Sender<()>>,
+
+    service_manager: ServiceManagerHandle,
 }
 
 impl page::Page<crate::pages::Message> for Page {
@@ -249,6 +253,85 @@ impl page::Page<crate::pages::Message> for Page {
                     .title(fl!("bluetooth-confirm-pin"))
                     .control(control)
                     .primary_action(confirm_button)
+                    .secondary_action(cancel_button)
+                    .apply(Element::from)
+                    .map(Into::into);
+
+                Some(dialog)
+            }
+
+            Dialog::DisplayPasskey {
+                device,
+                passkey,
+                entered,
+            } => {
+                let description = widget::text::body(fl!(
+                    "bluetooth-display-passkey",
+                    "description",
+                    device = device
+                ))
+                .wrapping(Wrapping::Word);
+
+                let passkey_str = format!("{passkey:06}");
+                let entered = *entered as usize;
+
+                let pin = widget::text::title1(passkey_str)
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center)
+                    .wrapping(Wrapping::None);
+
+                let mut control = widget::column::with_capacity(3).push(description).push(pin);
+
+                // Only show the key progress counter when the device actually
+                // reports keypress notifications. Most keyboards don't support
+                // this, so entered stays at 0 for the entire pairing process.
+                if entered > 0 {
+                    let progress = widget::text::body(format!("{entered} / 6 keys entered"))
+                        .width(Length::Fill)
+                        .align_x(Alignment::Center)
+                        .wrapping(Wrapping::None);
+                    control = control.push(progress);
+                }
+
+                let control = control.spacing(theme::spacing().space_xxs);
+
+                let cancel_button =
+                    widget::button::standard(fl!("cancel")).on_press(Message::PinCancel);
+
+                let dialog = widget::dialog()
+                    .title(fl!("bluetooth-display-passkey"))
+                    .control(control)
+                    .secondary_action(cancel_button)
+                    .apply(Element::from)
+                    .map(Into::into);
+
+                Some(dialog)
+            }
+
+            Dialog::DisplayPinCode { device, pincode } => {
+                let description = widget::text::body(fl!(
+                    "bluetooth-display-pin",
+                    "description",
+                    device = device
+                ))
+                .wrapping(Wrapping::Word);
+
+                let pin = widget::text::title1(pincode.clone())
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center)
+                    .wrapping(Wrapping::None);
+
+                let control = widget::column::with_capacity(2)
+                    .push(description)
+                    .push(pin)
+                    .spacing(theme::spacing().space_xxs);
+
+                let cancel_button =
+                    widget::button::standard(fl!("cancel")).on_press(Message::PinCancel);
+
+                let dialog = widget::dialog()
+                    .title(fl!("bluetooth-display-pin"))
+                    .control(control)
                     .secondary_action(cancel_button)
                     .apply(Element::from)
                     .map(Into::into);
@@ -401,6 +484,19 @@ impl Page {
                 }
 
                 Event::UpdatedDevice(path, update) => {
+                    // Dismiss passkey/pin display dialogs when pairing completes,
+                    // since BlueZ may not always send Cancel after a successful pair.
+                    if update
+                        .iter()
+                        .any(|u| matches!(u, DeviceUpdate::Paired(true)))
+                        && matches!(
+                            self.dialog,
+                            Some(Dialog::DisplayPasskey { .. } | Dialog::DisplayPinCode { .. })
+                        )
+                    {
+                        self.dialog = None;
+                    }
+
                     if let Some(existing) = self.model.devices.get_mut(&path) {
                         tracing::debug!("Device {} updated", existing.address);
                         existing.update(update);
@@ -434,7 +530,18 @@ impl Page {
                 }
 
                 Event::DBusServiceUnknown => {
-                    self.bluez_service_unknown = true;
+                    // D-Bus activation for org.bluez is absent.  On systemd this usually
+                    // means bluez isn't installed; on OpenRC it may be installed but lack
+                    // the D-Bus service file.  Check the service manager to disambiguate.
+                    if self.service_manager.is_installed() {
+                        // Service manager confirms the service exists — query its real state.
+                        self.bluez_service_unknown = false;
+                        self.service_is_active = self.service_manager.is_active();
+                        self.service_is_enabled = self.service_manager.is_enabled();
+                    } else {
+                        // Genuinely not installed — let status() show the unknown message.
+                        self.bluez_service_unknown = true;
+                    }
                 }
 
                 Event::Agent(message) => {
@@ -462,6 +569,32 @@ impl Page {
                                 passkey,
                                 response,
                             });
+                        }
+
+                        bluez_zbus::agent1::Message::DisplayPasskey {
+                            device,
+                            passkey,
+                            entered,
+                        } => {
+                            let device = self.model.devices.get(&device).map_or_else(
+                                || device.to_string(),
+                                |device| device.alias_or_addr().to_owned(),
+                            );
+
+                            self.dialog = Some(Dialog::DisplayPasskey {
+                                device,
+                                passkey,
+                                entered,
+                            });
+                        }
+
+                        bluez_zbus::agent1::Message::DisplayPinCode { device, pincode } => {
+                            let device = self.model.devices.get(&device).map_or_else(
+                                || device.to_string(),
+                                |device| device.alias_or_addr().to_owned(),
+                            );
+
+                            self.dialog = Some(Dialog::DisplayPinCode { device, pincode });
                         }
 
                         bluez_zbus::agent1::Message::RequestPasskey { response, .. } => {
@@ -552,8 +685,8 @@ impl Page {
             }
 
             Message::DBusConnect(connection) => {
-                self.service_is_active = systemd::is_bluetooth_active();
-                self.service_is_enabled = systemd::is_bluetooth_enabled();
+                self.service_is_active = self.service_manager.is_active();
+                self.service_is_enabled = self.service_manager.is_enabled();
                 self.connection = Some(connection.clone());
 
                 let get_adapters_fut = get_adapters(connection.clone());
@@ -685,8 +818,9 @@ impl Page {
             }
 
             Message::ServiceActivate => {
-                return cosmic::task::future(async {
-                    systemd::activate_bluetooth().await;
+                let activate_future = self.service_manager.activate();
+                return cosmic::task::future(async move {
+                    activate_future.await;
                     tokio::time::sleep(Duration::from_secs(3)).await;
 
                     match zbus::Connection::system().await {
@@ -697,8 +831,9 @@ impl Page {
             }
 
             Message::ServiceEnable => {
-                return cosmic::task::future(async {
-                    systemd::enable_bluetooth().await;
+                let enable_future = self.service_manager.enable();
+                return cosmic::task::future(async move {
+                    enable_future.await;
                     tokio::time::sleep(Duration::from_secs(3)).await;
 
                     match zbus::Connection::system().await {
@@ -757,7 +892,7 @@ fn status() -> Section<crate::pages::Message> {
                 return bluetooth_service_issue(
                     fl!("bluetooth", "inactive"),
                     fl!("activate"),
-                    Message::ServiceEnable,
+                    Message::ServiceActivate,
                 );
             }
 
@@ -772,12 +907,10 @@ fn status() -> Section<crate::pages::Message> {
             }
 
             widget::list_column()
-                .add(
-                    bluetooth_toggle.control(
-                        widget::toggler(matches!(status, Active::Enabling | Active::Enabled))
-                            .on_toggle(|active| Message::SetActive(active).into()),
-                    ),
-                )
+                .add(bluetooth_toggle.toggler(
+                    matches!(status, Active::Enabling | Active::Enabled),
+                    |active| Message::SetActive(active).into(),
+                ))
                 .apply(Element::from)
         })
 }
@@ -1012,36 +1145,65 @@ fn multiple_adapter() -> Section<crate::pages::Message> {
 
 impl page::AutoBind<crate::pages::Message> for Page {}
 
-mod systemd {
-    use futures::FutureExt;
+impl Page {
+    #[cfg(test)]
+    fn with_service_manager(service_manager: ServiceManagerHandle) -> Self {
+        Self {
+            service_manager,
+            ..Page::default()
+        }
+    }
+}
 
-    pub fn activate_bluetooth() -> impl Future<Output = ()> + Send {
-        tokio::process::Command::new("pkexec")
-            .args(["systemctl", "start", "bluetooth"])
-            .status()
-            .map(|_| ())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dbus_service_unknown_with_installed_service_queries_manager() {
+        let bluetooth = MockServiceManager::new(true, false);
+        let mut page = Page::with_service_manager(ServiceManagerHandle::new(Box::new(bluetooth)));
+        let _task = page.update(Message::BluetoothEvent(Event::DBusServiceUnknown));
+
+        assert!(page.service_is_enabled);
+        assert!(!page.service_is_active);
+        assert!(!page.bluez_service_unknown);
     }
 
-    pub fn enable_bluetooth() -> impl Future<Output = ()> + Send {
-        tokio::process::Command::new("pkexec")
-            .args(["systemctl", "enable", "--now", "bluetooth"])
-            .status()
-            .map(|_| ())
+    #[test]
+    fn test_dbus_service_unknown_with_uninstalled_service_sets_bluez_unknown() {
+        let bluetooth = MockServiceManager::new(true, true).with_installed(false);
+        let mut page = Page::with_service_manager(ServiceManagerHandle::new(Box::new(bluetooth)));
+        let _task = page.update(Message::BluetoothEvent(Event::DBusServiceUnknown));
+
+        assert!(page.bluez_service_unknown);
+        assert!(!page.service_is_enabled);
+        assert!(!page.service_is_active);
     }
 
-    pub fn is_bluetooth_enabled() -> bool {
-        std::process::Command::new("systemctl")
-            .args(["is-enabled", "bluetooth"])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(true)
+    #[test]
+    fn test_dbus_service_unknown_clears_previously_set_bluez_service_unknown() {
+        // Simulate a stale state and verify the handler re-checks via is_installed().
+        let bluetooth = MockServiceManager::new(true, true);
+        let mut page = Page::with_service_manager(ServiceManagerHandle::new(Box::new(bluetooth)));
+        page.bluez_service_unknown = true;
+
+        let _task = page.update(Message::BluetoothEvent(Event::DBusServiceUnknown));
+
+        assert!(!page.bluez_service_unknown);
     }
 
-    pub fn is_bluetooth_active() -> bool {
-        std::process::Command::new("systemctl")
-            .args(["is-active", "bluetooth"])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(true)
+    #[tokio::test]
+    async fn test_service_activate_calls_through_to_service_manager() {
+        let bluetooth = MockServiceManager::new(false, false);
+        let mut page = Page::with_service_manager(ServiceManagerHandle::new(Box::new(bluetooth)));
+        let _task = page.update(Message::ServiceActivate);
+    }
+
+    #[tokio::test]
+    async fn test_service_enable_calls_through_to_service_manager() {
+        let bluetooth = MockServiceManager::new(false, false);
+        let mut page = Page::with_service_manager(ServiceManagerHandle::new(Box::new(bluetooth)));
+        let _task = page.update(Message::ServiceEnable);
     }
 }

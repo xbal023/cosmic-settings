@@ -452,7 +452,7 @@ impl Page {
             .padding([16, 24]);
 
         let keys = self.add_shortcut.keys.iter().fold(
-            widget::list_column().spacing(0),
+            widget::list_column(),
             |column, (id, (text, widget_id))| {
                 let key_combination = widget::editable_input(
                     fl!("type-key-combination"),
@@ -474,7 +474,7 @@ impl Page {
             },
         );
 
-        let controls = widget::list_column().add(input_fields).add(keys).spacing(0);
+        let controls = widget::list_column().add(input_fields).add(keys);
 
         let add_keybinding_button = widget::button::standard(fl!("add-another-keybinding"))
             .on_press(Message::AddShortcut)
@@ -590,7 +590,8 @@ impl page::Page<crate::pages::Message> for Page {
         &self,
         core: &cosmic::Core,
     ) -> cosmic::iced::Subscription<crate::pages::Message> {
-        use cosmic::iced::{self, event::listen_with};
+        use cosmic::iced::event::listen_with;
+        use cosmic::iced::{self};
 
         cosmic::iced::Subscription::batch(vec![
             if self.add_shortcut.active
@@ -605,7 +606,8 @@ impl page::Page<crate::pages::Message> for Page {
                         modifiers,
                         ..
                     }) => {
-                        use cosmic::iced::keyboard::{Key, key::Named};
+                        use cosmic::iced::keyboard::Key;
+                        use cosmic::iced::keyboard::key::Named;
                         if matches!(
                             key,
                             Key::Named(Named::Super | Named::Alt | Named::Control | Named::Shift)
@@ -624,7 +626,8 @@ impl page::Page<crate::pages::Message> for Page {
                         location,
                         ..
                     }) => {
-                        use cosmic::iced::keyboard::{Key, key::Named};
+                        use cosmic::iced::keyboard::Key;
+                        use cosmic::iced::keyboard::key::Named;
                         if matches!(
                             key,
                             Key::Named(Named::Super | Named::Alt | Named::Control | Named::Shift)
