@@ -70,6 +70,9 @@ cosmic-bg-config = { path = "../cosmic-bg/config" }
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols//", rev = "d0e95be" }
 cosmic-client-toolkit = { git = "https://github.com/pop-os/cosmic-protocols//", rev = "d0e95be" }
 
+[patch.'https://github.com/pop-os/cosmic-panel']
+cosmic-panel-config = { path = "../cosmic-panel/cosmic-panel-config" }
+
 # [patch.'https://github.com/pop-os/cosmic-settings-daemon']
 # cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon//", branch = "input_nobuild" }
 

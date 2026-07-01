@@ -352,6 +352,159 @@ pub(crate) fn style<
         })
 }
 
+pub(crate) fn inner_glow<
+    P: page::Page<crate::pages::Message> + PanelPage,
+    T: Fn(Message) -> crate::pages::Message + Copy + Send + Sync + 'static,
+>(
+    _p: &P,
+    msg_map: T,
+) -> Section<crate::pages::Message> {
+    Section::default()
+        .title("Kustomisasi Inner Glow")
+        .view::<P>(move |_binder, page, section| {
+            let inner = page.inner();
+            let Some(panel_config) = inner.panel_config.as_ref() else {
+                return Element::from(text::body(fl!("unknown")));
+            };
+            
+            let glow = panel_config.inner_glow.clone().unwrap_or_default();
+
+            let section_builder = settings::section()
+                .title(&section.title)
+                .add(
+                    settings::item::builder("Kecerahan Glow").flex_control({
+                        row::with_capacity(2)
+                            .align_y(Alignment::Center)
+                            .spacing(8)
+                            .width(Length::Fill)
+                            .push(
+                                text::body(format!("{}%", (glow.brightness * 100.0) as i32))
+                                .width(Length::Fixed(45.0))
+                                .align_x(Alignment::Center),
+                            )
+                            .push(
+                                slider(0..=100, (glow.brightness * 100.0) as i32, |v| {
+                                    Message::InnerGlowBrightness(v as f32 / 100.0)
+                                })
+                                .width(Length::Fill)
+                                .apply(container)
+                                .max_width(250),
+                            )
+                    })
+                )
+                .add(
+                    settings::item::builder("Tingkat Inner Glow").flex_control({
+                        row::with_capacity(2)
+                            .align_y(Alignment::Center)
+                            .spacing(8)
+                            .width(Length::Fill)
+                            .push(
+                                text::body(format!("{}%", (glow.level * 100.0) as i32))
+                                .width(Length::Fixed(45.0))
+                                .align_x(Alignment::Center),
+                            )
+                            .push(
+                                slider(0..=100, (glow.level * 100.0) as i32, |v| {
+                                    Message::InnerGlowLevel(v as f32 / 100.0)
+                                })
+                                .width(Length::Fill)
+                                .apply(container)
+                                .max_width(250),
+                            )
+                    })
+                )
+                .add(
+                    settings::item("Aktifkan Animasi Glow", toggler(glow.animation_enabled).on_toggle(Message::InnerGlowAnimationEnabled))
+                )
+                .add(
+                    settings::item::builder("Waktu Animasi (ms)").flex_control({
+                        row::with_capacity(2)
+                            .align_y(Alignment::Center)
+                            .spacing(8)
+                            .width(Length::Fill)
+                            .push(
+                                text::body(format!("{} ms", glow.animation_time_ms))
+                                .width(Length::Fixed(70.0))
+                                .align_x(Alignment::Center),
+                            )
+                            .push(
+                                slider(100..=10000, glow.animation_time_ms, |v| {
+                                    Message::InnerGlowAnimationTime(v)
+                                })
+                                .width(Length::Fill)
+                                .apply(container)
+                                .max_width(250),
+                            )
+                .add(
+                    settings::item::builder("Warna Glow (Merah)").flex_control({
+                        row::with_capacity(2)
+                            .align_y(Alignment::Center)
+                            .spacing(8)
+                            .width(Length::Fill)
+                            .push(
+                                text::body(format!("{}%", (glow.color[0] * 100.0) as i32))
+                                .width(Length::Fixed(45.0))
+                                .align_x(Alignment::Center),
+                            )
+                            .push(
+                                slider(0..=100, (glow.color[0] * 100.0) as i32, |v| {
+                                    Message::InnerGlowColorR(v as f32 / 100.0)
+                                })
+                                .width(Length::Fill)
+                                .apply(container)
+                                .max_width(250),
+                            )
+                    })
+                )
+                .add(
+                    settings::item::builder("Warna Glow (Hijau)").flex_control({
+                        row::with_capacity(2)
+                            .align_y(Alignment::Center)
+                            .spacing(8)
+                            .width(Length::Fill)
+                            .push(
+                                text::body(format!("{}%", (glow.color[1] * 100.0) as i32))
+                                .width(Length::Fixed(45.0))
+                                .align_x(Alignment::Center),
+                            )
+                            .push(
+                                slider(0..=100, (glow.color[1] * 100.0) as i32, |v| {
+                                    Message::InnerGlowColorG(v as f32 / 100.0)
+                                })
+                                .width(Length::Fill)
+                                .apply(container)
+                                .max_width(250),
+                            )
+                    })
+                )
+                .add(
+                    settings::item::builder("Warna Glow (Biru)").flex_control({
+                        row::with_capacity(2)
+                            .align_y(Alignment::Center)
+                            .spacing(8)
+                            .width(Length::Fill)
+                            .push(
+                                text::body(format!("{}%", (glow.color[2] * 100.0) as i32))
+                                .width(Length::Fixed(45.0))
+                                .align_x(Alignment::Center),
+                            )
+                            .push(
+                                slider(0..=100, (glow.color[2] * 100.0) as i32, |v| {
+                                    Message::InnerGlowColorB(v as f32 / 100.0)
+                                })
+                                .width(Length::Fill)
+                                .apply(container)
+                                .max_width(250),
+                            )
+                    })
+                );
+
+            section_builder
+                .apply(Element::from)
+                .map(msg_map)
+        })
+}
+
 pub(crate) fn configuration<P: page::Page<crate::pages::Message> + PanelPage>(
     p: &P,
 ) -> Section<crate::pages::Message> {
@@ -521,6 +674,13 @@ pub enum Message {
     MagnificationScale(f32),
     OpacityRequest(f32),
     OpacityApply,
+    InnerGlowBrightness(f32),
+    InnerGlowLevel(f32),
+    InnerGlowAnimationEnabled(bool),
+    InnerGlowAnimationTime(u32),
+    InnerGlowColorR(f32),
+    InnerGlowColorG(f32),
+    InnerGlowColorB(f32),
     OutputAdded(String, WlOutput),
     OutputRemoved(WlOutput),
     PanelConfig(Box<CosmicPanelConfig>),
@@ -759,6 +919,49 @@ impl PageInner {
             Message::OpacityApply => {
                 self.opacity_changing = false;
                 _ = helper.set("opacity", panel_config.opacity);
+            }
+            
+            Message::InnerGlowBrightness(val) => {
+                let mut glow = panel_config.inner_glow.clone().unwrap_or_default();
+                glow.brightness = val;
+                panel_config.inner_glow = Some(glow);
+                let _ = panel_config.write_entry(helper);
+            }
+            Message::InnerGlowLevel(val) => {
+                let mut glow = panel_config.inner_glow.clone().unwrap_or_default();
+                glow.level = val;
+                panel_config.inner_glow = Some(glow);
+                let _ = panel_config.write_entry(helper);
+            }
+            Message::InnerGlowAnimationEnabled(val) => {
+                let mut glow = panel_config.inner_glow.clone().unwrap_or_default();
+                glow.animation_enabled = val;
+                panel_config.inner_glow = Some(glow);
+                let _ = panel_config.write_entry(helper);
+            }
+            Message::InnerGlowAnimationTime(val) => {
+                let mut glow = panel_config.inner_glow.clone().unwrap_or_default();
+                glow.animation_time_ms = val;
+                panel_config.inner_glow = Some(glow);
+                let _ = panel_config.write_entry(helper);
+            }
+            Message::InnerGlowColorR(val) => {
+                let mut glow = panel_config.inner_glow.clone().unwrap_or_default();
+                glow.color[0] = val;
+                panel_config.inner_glow = Some(glow);
+                let _ = panel_config.write_entry(helper);
+            }
+            Message::InnerGlowColorG(val) => {
+                let mut glow = panel_config.inner_glow.clone().unwrap_or_default();
+                glow.color[1] = val;
+                panel_config.inner_glow = Some(glow);
+                let _ = panel_config.write_entry(helper);
+            }
+            Message::InnerGlowColorB(val) => {
+                let mut glow = panel_config.inner_glow.clone().unwrap_or_default();
+                glow.color[2] = val;
+                panel_config.inner_glow = Some(glow);
+                let _ = panel_config.write_entry(helper);
             }
 
             Message::OutputAdded(name, output) => {

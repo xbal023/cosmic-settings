@@ -12,7 +12,7 @@ use slotmap::SlotMap;
 use tracing::error;
 
 use crate::pages::desktop::panel::inner::{
-    add_panel, behavior_and_position, configuration, reset_button, style,
+    add_panel, behavior_and_position, configuration, reset_button, style, inner_glow,
 };
 
 use super::panel::inner::{self, PageInner, PanelPage};
@@ -205,6 +205,9 @@ impl page::Page<crate::pages::Message> for Page {
                     crate::pages::Message::Dock(Message::Inner(m))
                 })),
                 sections.insert(style::<Page, _>(self, |m| {
+                    crate::pages::Message::Dock(Message::Inner(m))
+                })),
+                sections.insert(inner_glow::<Page, _>(self, |m| {
                     crate::pages::Message::Dock(Message::Inner(m))
                 })),
                 sections.insert(configuration::<Page>(self)),
